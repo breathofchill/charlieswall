@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Living Character Gallery</title>
+
+  <!-- Friendly rounded typography (with clean system fallbacks if offline) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet" />
+
+  <!-- QR Code generator (zero-dependency, works cleanly in browser) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+
+  <!-- PeerJS (WebRTC DataChannels) for zero-backend cross-device phone -> big-screen sync -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <style>
+    :root {
+      --bg-cream: #fbf6ec;
+      --bg-warm: #f3ead8;
+      --wood-light: #e5cfa8;
+      --wood-dark: #c49a6c;
+      --ink: #2f2a24;
+      --ink-soft: #6f6558;
+      --coral: #ff6b57;
+      --coral-dark: #e6523e;
+      --teal: #2ec4b6;
+      --teal-dark: #1fa397;
+      --sun: #ffb703;
+      --berry: #8338ec;
+      --card-bg: rgba(255, 253, 248, 0.94);
+      --shadow-soft: 0 12px 32px rgba(64, 46, 24, 0.12);
+      --shadow-cutout: drop-shadow(0 10px 14px rgba(55, 38, 18, 0.22));
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --font-display: 'Fredoka', 'Nunito', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+      --font-body: 'Nunito', ui-rounded, system-ui, -apple-system, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      font-family: var(--font-body);
+      color: var(--ink);
+      background-color: var(--bg-cream);
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Subtle tactile craft-paper backdrop */
+    .paper-backdrop {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(255, 214, 153, 0.28), transparent 45%),
+        radial-gradient(circle at 80% 15%, rgba(46, 196, 182, 0.14), transparent 40%),
+        radial-gradient(circle at 50% 85%, rgba(255, 107, 87, 0.12), transparent 50%),
+        linear-gradient(180deg, #fcf8ef 0%, #f5ecdc 100%);
+      z-index: 0;
+    }
+
+    .paper-backdrop::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      opacity: 0.35;
+      pointer-events: none;
+      background-image: radial-gradient(rgba(130, 105, 70, 0.16) 1px, transparent 1px);
+      background-size: 22px 22px;
+    }
+
+    /* Subtle gallery stage / wainscoting accent at the bottom */
+    .gallery-stage-floor {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 54px;
+      background: linear-gradient(180deg, rgba(229, 207, 168, 0.42) 0%, rgba(196, 154, 108, 0.36) 100%);
+      border-top: 3px solid rgba(196, 154, 108, 0.45);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* =========================================================
+       GALLERY MODE (Big Screen / Projector)
+       ========================================================= */
+    #gallery-view {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      display: none;
+    }
+
+    #gallery-view.active {
+      display: block;
+    }
+
+    /* Top bar: title + connection pill */
+    .gallery-header {
+      position: fixed;
+      top: 16px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 30;
+    }
+
+    .gallery-brand {
+      pointer-events: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--card-bg);
+      padding: 8px 18px 8px 12px;
+      border-radius: 999px;
+      box-shadow: 0 6px 20px rgba(64, 46, 24, 0.08);
+      border: 2px solid rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(8px);
+    }
+
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--coral), var(--sun));
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      box-shadow: 0 3px 8px rgba(255, 107, 87, 0.3);
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      color: var(--ink);
+    }
+
+    .header-actions {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill-btn {
+      appearance: none;
+      border: 2px solid rgba(255, 255, 255, 0.95);
+      background: var(--card-bg);
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.92rem;
+      padding: 9px 15px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      box-shadow: 0 6px 18px rgba(64, 46, 24, 0.09);
+      transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+
+    .pill-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 9px 22px rgba(64, 46, 24, 0.13);
+    }
+
+    .pill-btn:active {
+      transform: scale(0.96);
+    }
+
+    .pill-btn.primary {
+      background: var(--coral);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.4);
+    }
+
+    .pill-btn.primary:hover {
+      background: var(--coral-dark);
+    }
+
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #ccc;
+      display: inline-block;
+    }
+    .status-dot.ready { background: var(--teal); box-shadow: 0 0 0 3px rgba(46, 196, 182, 0.22); }
+    .status-dot.connecting { background: var(--sun); animation: pulseDot 1.2s infinite; }
+    .status-dot.offline { background: #b8afa3; }
+
+    @keyframes pulseDot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(1.25); }
+    }
+
+    /* Stage where living cutouts roam */
+    #gallery-stage {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      z-index: 5;
+    }
+
+    /* Individual Paper Cutout Character */
+    .cutout-actor {
+      position: absolute;
+      top: 0;
+      left: 0;
+      will-change: transform;
+      cursor: grab;
+      transform-origin: center 75%;
+      touch-action: none;
+    }
+
+    .cutout-actor.dragging {
+      cursor: grabbing;
+      z-index: 25;
+    }
+
+    .cutout-actor.dragging .cutout-inner {
+      transform: scale(1.1);
+    }
+
+    /* File Drag-and-Drop Overlay */
+    .drop-overlay {
+      position: fixed;
+      inset: 14px;
+      border-radius: var(--radius-lg);
+      border: 4px dashed var(--teal);
+      background: rgba(255, 253, 248, 0.88);
+      backdrop-filter: blur(6px);
+      z-index: 60;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      pointer-events: none;
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--teal-dark);
+    }
+    .drop-overlay.active {
+      display: flex;
+    }
+
+    .cutout-inner {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .cutout-actor:hover .cutout-inner {
+      transform: scale(1.06);
+    }
+
+    .cutout-actor.hop .cutout-inner {
+      animation: happyHop 0.68s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .cutout-actor.entering .cutout-inner {
+      animation: entrancePop 0.85s cubic-bezier(0.22, 1.4, 0.36, 1);
+    }
+
+    @keyframes happyHop {
+      0% { transform: translateY(0) scale(1) rotate(0deg); }
+      25% { transform: translateY(-28px) scale(1.12) rotate(-6deg); }
+      50% { transform: translateY(-6px) scale(1.08) rotate(6deg); }
+      75% { transform: translateY(-16px) scale(1.1) rotate(-3deg); }
+      100% { transform: translateY(0) scale(1) rotate(0deg); }
+    }
+
+    @keyframes entrancePop {
+      0% { transform: scale(0.1) rotate(-18deg) translateY(40px); opacity: 0; }
+      65% { transform: scale(1.14) rotate(4deg) translateY(-10px); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg) translateY(0); opacity: 1; }
+    }
+
+    .cutout-img {
+      display: block;
+      max-width: 210px;
+      max-height: 210px;
+      width: auto;
+      height: auto;
+      border-radius: 14px;
+      pointer-events: none;
+      filter: var(--shadow-cutout);
+      user-select: none;
+    }
+
+    .cutout-tag {
+      margin-top: 4px;
+      background: rgba(255, 253, 248, 0.94);
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 3px 11px;
+      border-radius: 999px;
+      box-shadow: 0 3px 10px rgba(64, 46, 24, 0.14);
+      border: 1.5px solid rgba(196, 154, 108, 0.35);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    .cutout-new-badge {
+      position: absolute;
+      top: -10px;
+      right: -8px;
+      background: var(--coral);
+      color: #fff;
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      box-shadow: 0 4px 10px rgba(255, 107, 87, 0.35);
+      border: 2px solid #fff;
+      transform: rotate(8deg);
+      animation: badgeBounce 1s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+
+    @keyframes badgeBounce {
+      from { transform: rotate(6deg) scale(1); }
+      to { transform: rotate(10deg) scale(1.08); }
+    }
+
+    .sparkle-pop {
+      position: absolute;
+      top: -22px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 1rem;
+      color: var(--coral-dark);
+      background: #fff;
+      padding: 4px 12px;
+      border-radius: 999px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+      pointer-events: none;
+      white-space: nowrap;
+      animation: floatUpFade 1.05s ease-out forwards;
+      z-index: 10;
+    }
+
+    @keyframes floatUpFade {
+      0% { opacity: 0; transform: translate(-50%, 8px) scale(0.7); }
+      20% { opacity: 1; transform: translate(-50%, -6px) scale(1.05); }
+      100% { opacity: 0; transform: translate(-50%, -36px) scale(0.95); }
+    }
+
+    /* Empty State / Welcome Card */
+    .empty-state {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 6;
+      pointer-events: none;
+    }
+
+    .empty-card {
+      pointer-events: auto;
+      max-width: 460px;
+      width: 100%;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 28px 26px;
+      text-align: center;
+      box-shadow: var(--shadow-soft);
+      border: 3px solid #fff;
+    }
+
+    .empty-card h1 {
+      font-family: var(--font-display);
+      font-size: 1.7rem;
+      margin: 0 0 8px;
+      color: var(--ink);
+    }
+
+    .empty-card p {
+      margin: 0 0 18px;
+      color: var(--ink-soft);
+      font-size: 1rem;
+      line-height: 1.45;
+    }
+
+    .empty-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 14px;
+    }
+
+    /* Corner QR Pairing Card */
+    .qr-floating-card {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      width: 226px;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 14px;
+      box-shadow: var(--shadow-soft);
+      border: 3px solid #fff;
+      z-index: 35;
+      text-align: center;
+      transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+    }
+
+    .qr-floating-card.hidden {
+      transform: translateY(130%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .qr-box {
+      background: #fff;
+      padding: 10px;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 0 2px rgba(196, 154, 108, 0.22);
+      margin-bottom: 8px;
+    }
+
+    .qr-box img, .qr-box svg, .qr-box canvas {
+      display: block;
+      width: 156px;
+      height: 156px;
+    }
+
+    .qr-title {
+      font-family: var(--font-display);
+      font-size: 0.98rem;
+      font-weight: 700;
+      margin: 2px 0 4px;
+    }
+
+    .room-code-pill {
+      display: inline-block;
+      background: var(--bg-warm);
+      border: 1.5px dashed var(--wood-dark);
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      font-size: 0.95rem;
+      padding: 3px 12px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+
+    .qr-sub {
+      font-size: 0.76rem;
+      color: var(--ink-soft);
+      line-height: 1.3;
+      margin: 0;
+    }
+
+    .qr-test-link {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--teal-dark);
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .qr-test-link:hover { text-decoration: underline; }
+
+    /* Host Controls Drawer */
+    .host-drawer {
+      position: fixed;
+      top: 72px;
+      right: 20px;
+      width: 300px;
+      max-height: calc(100vh - 96px);
+      overflow-y: auto;
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      box-shadow: var(--shadow-soft);
+      border: 3px solid #fff;
+      z-index: 40;
+      display: none;
+    }
+
+    .host-drawer.open {
+      display: block;
+      animation: drawerIn 0.2s ease-out;
+    }
+
+    @keyframes drawerIn {
+      from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .host-drawer h3 {
+      font-family: var(--font-display);
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .control-group {
+      margin-bottom: 14px;
+    }
+
+    .control-group label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--ink-soft);
+      margin-bottom: 6px;
+    }
+
+    .control-group input[type="range"] {
+      width: 100%;
+      accent-color: var(--coral);
+      cursor: pointer;
+    }
+
+    .host-btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .btn-sm {
+      appearance: none;
+      border: 1.5px solid rgba(196, 154, 108, 0.35);
+      background: #fff;
+      color: var(--ink);
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 8px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.1s ease;
+    }
+
+    .btn-sm:hover { background: var(--bg-warm); }
+    .btn-sm:active { transform: scale(0.97); }
+    .btn-sm.danger { color: #c93b2b; border-color: rgba(201, 59, 43, 0.28); }
+    .btn-sm.danger:hover { background: #fff0ee; }
+
+    .char-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .char-list-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      padding: 6px 8px;
+      border-radius: 12px;
+      border: 1px solid rgba(196, 154, 108, 0.25);
+    }
+
+    .char-list-item img {
+      width: 34px;
+      height: 34px;
+      object-fit: contain;
+      border-radius: 6px;
+      background: var(--bg-cream);
+    }
+
+    .char-list-name {
+      flex: 1;
+      font-size: 0.84rem;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .icon-btn {
+      appearance: none;
+      border: none;
+      background: var(--bg-cream);
+      color: var(--ink);
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 0.85rem;
+    }
+    .icon-btn:hover { background: var(--bg-warm); }
+
+    /* =========================================================
+       MOBILE CAPTURE MODE (Phone / Tablet Camera)
+       ========================================================= */
+    #capture-view {
+      position: relative;
+      z-index: 10;
+      width: 100%;
+      height: 100%;
+      overflow-y: auto;
+      display: none;
+      padding: 16px 16px 36px;
+    }
+
+    #capture-view.active {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .capture-shell {
+      width: 100%;
+      max-width: 460px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .capture-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: var(--card-bg);
+      padding: 10px 14px;
+      border-radius: 999px;
+      box-shadow: 0 6px 18px rgba(64, 46, 24, 0.08);
+      border: 2px solid #fff;
+    }
+
+    .capture-room-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-family: var(--font-display);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    .capture-card {
+      background: var(--card-bg);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      box-shadow: var(--shadow-soft);
+      border: 3px solid #fff;
+      text-align: center;
+    }
+
+    .capture-card h2 {
+      font-family: var(--font-display);
+      font-size: 1.45rem;
+      margin: 0 0 6px;
+    }
+
+    .capture-card p {
+      margin: 0 0 16px;
+      font-size: 0.94rem;
+      color: var(--ink-soft);
+      line-height: 1.4;
+    }
+
+    .big-cta {
+      width: 100%;
+      appearance: none;
+      border: none;
+      background: linear-gradient(135deg, var(--coral), #ff8457);
+      color: #fff;
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 700;
+      padding: 16px 20px;
+      border-radius: 18px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 8px 20px rgba(255, 107, 87, 0.32);
+      transition: transform 0.14s ease, box-shadow 0.14s ease;
+    }
+
+    .big-cta:active { transform: scale(0.97); }
+    .big-cta.teal {
+      background: linear-gradient(135deg, var(--teal), #4ad4c6);
+      box-shadow: 0 8px 20px rgba(46, 196, 182, 0.3);
+    }
+    .big-cta.secondary {
+      background: #fff;
+      color: var(--ink);
+      border: 2px solid rgba(196, 154, 108, 0.4);
+      box-shadow: none;
+      font-size: 1rem;
+      padding: 13px 16px;
+    }
+
+    .sample-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .sample-chip {
+      appearance: none;
+      border: 2px solid rgba(196, 154, 108, 0.28);
+      background: #fff;
+      border-radius: 14px;
+      padding: 10px 6px;
+      font-family: var(--font-display);
+      font-size: 0.84rem;
+      font-weight: 600;
+      color: var(--ink);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      transition: transform 0.12s ease, border-color 0.12s ease;
+    }
+    .sample-chip:hover { border-color: var(--teal); transform: translateY(-2px); }
+
+    /* Live Camera Video Box */
+    .live-cam-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #1c1917;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .live-cam-wrap.active { display: block; }
+    .live-cam-wrap video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .cam-guide {
+      position: absolute;
+      inset: 14px;
+      border: 2.5px dashed rgba(255, 255, 255, 0.75);
+      border-radius: 14px;
+      pointer-events: none;
+    }
+
+    /* Cutout Preview Stage on Phone */
+    .preview-stage {
+      width: 100%;
+      min-height: 230px;
+      max-height: 300px;
+      border-radius: 18px;
+      background:
+        linear-gradient(45deg, #efe7d6 25%, transparent 25%),
+        linear-gradient(-45deg, #efe7d6 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #efe7d6 75%),
+        linear-gradient(-45deg, transparent 75%, #efe7d6 75%);
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+      background-color: #f8f2e6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+
+    .preview-stage img {
+      max-width: 100%;
+      max-height: 260px;
+      object-fit: contain;
+      filter: var(--shadow-cutout);
+      animation: gentlePreviewWobble 2.8s ease-in-out infinite alternate;
+    }
+
+    @keyframes gentlePreviewWobble {
+      from { transform: rotate(-2.5deg); }
+      to { transform: rotate(2.5deg); }
+    }
+
+    .text-input {
+      width: 100%;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 2px solid rgba(196, 154, 108, 0.35);
+      background: #fff;
+      color: var(--ink);
+      outline: none;
+      margin-bottom: 12px;
+    }
+    .text-input:focus { border-color: var(--teal); }
+
+    .capture-btn-pair {
+      display: grid;
+      grid-template-columns: 1fr 1.6fr;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .sent-banner {
+      display: none;
+      padding: 18px;
+      border-radius: 18px;
+      background: #e9fbf8;
+      border: 2px solid var(--teal);
+      color: #146c63;
+      font-family: var(--font-display);
+      font-weight: 700;
+      margin-top: 12px;
+    }
+    .sent-banner.show { display: block; animation: entrancePop 0.45s ease; }
+
+    .hidden-input { display: none; }
+
+    .room-connect-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .room-connect-row input {
+      flex: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-family: var(--font-display);
+      font-weight: 700;
+      padding: 9px 12px;
+      border-radius: 12px;
+      border: 2px solid rgba(196, 154, 108, 0.35);
+    }
+
+    @media (max-width: 640px) {
+      .qr-floating-card {
+        width: 184px;
+        padding: 10px;
+        bottom: 12px;
+        left: 12px;
+      }
+      .qr-box img, .qr-box svg, .qr-box canvas {
+        width: 124px;
+        height: 124px;
+      }
+      .brand-title { font-size: 0.98rem; }
+      .cutout-img { max-width: 150px; max-height: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="paper-backdrop"></div>
+  <div class="gallery-stage-floor"></div>
+
+  <!-- =========================================================
+       GALLERY VIEW (BIG SCREEN / PROJECTOR)
+       ========================================================= -->
+  <main id="gallery-view">
+    <header class="gallery-header">
+      <div class="gallery-brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="3"></rect>
+            <circle cx="9" cy="9" r="2"></circle>
+            <path d="M21 15l-5-5L5 21"></path>
+          </svg>
+        </div>
+        <span class="brand-title">Character Gallery</span>
+      </div>
+
+      <div class="header-actions">
+        <button id="toggle-qr-btn" class="pill-btn" title="Show or hide QR code">
+          <span class="status-dot connecting" id="gallery-status-dot"></span>
+          <span id="qr-toggle-label">Hide QR</span>
+        </button>
+        <button id="host-menu-btn" class="pill-btn" title="Host controls">
+          Controls
+        </button>
+      </div>
+    </header>
+
+    <!-- Floating animated characters live here -->
+    <section id="gallery-stage" aria-live="polite"></section>
+    <div id="drop-overlay" class="drop-overlay">Drop an image file to add it to the gallery</div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="empty-state">
+      <div class="empty-card">
+        <h1>Character Gallery</h1>
+        <p>
+          Scan the QR code with a phone to photograph a drawing, or drag an image file onto this window.
+        </p>
+        <div class="empty-actions">
+          <button id="empty-add-sample-btn" class="pill-btn primary">Load Sample Drawings</button>
+          <button id="empty-open-capture-btn" class="pill-btn">Open Capture Page</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Corner QR Pairing Card -->
+    <aside id="qr-card" class="qr-floating-card">
+      <div id="qr-code-container" class="qr-box"></div>
+      <div class="qr-title">Scan to upload</div>
+      <div class="room-code-pill" id="gallery-room-code">------</div>
+      <p class="qr-sub" id="qr-help-text">Point your phone camera at the QR code.</p>
+      <a class="qr-test-link" id="open-capture-same-device" href="#capture" target="_blank" rel="noopener">
+        Open capture in new tab
+      </a>
+    </aside>
+
+    <!-- Discreet Host Controls Drawer -->
+    <aside id="host-drawer" class="host-drawer" aria-label="Host Controls">
+      <h3>
+        <span>Gallery Controls</span>
+        <button id="close-host-btn" class="icon-btn" title="Close">×</button>
+      </h3>
+
+      <div class="host-btn-row">
+        <button id="pause-play-btn" class="btn-sm">Pause</button>
+        <button id="host-add-sample-btn" class="btn-sm">Add Sample</button>
+      </div>
+
+      <div class="control-group">
+        <label>
+          <span>Wobble</span>
+          <span id="wobble-val">100%</span>
+        </label>
+        <input id="wobble-slider" type="range" min="0" max="200" value="100" />
+      </div>
+
+      <div class="control-group">
+        <label>
+          <span>Speed</span>
+          <span id="speed-val">100%</span>
+        </label>
+        <input id="speed-slider" type="range" min="0" max="220" value="100" />
+      </div>
+
+      <div class="host-btn-row">
+        <button id="new-room-btn" class="btn-sm">New Room</button>
+        <button id="clear-gallery-btn" class="btn-sm danger">Clear All</button>
+      </div>
+
+      <div class="control-group" style="margin-bottom:0;">
+        <label><span>Characters (<span id="char-count">0</span>)</span></label>
+        <div id="host-char-list" class="char-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- =========================================================
+       MOBILE CAPTURE VIEW (PHONE / TABLET)
+       ========================================================= -->
+  <main id="capture-view">
+    <div class="capture-shell">
+      <div class="capture-top">
+        <div class="capture-room-badge">
+          <span class="status-dot connecting" id="capture-status-dot"></span>
+          <span id="capture-status-text">Connecting…</span>
+        </div>
+        <a href="#" id="switch-to-gallery-link" style="font-family:var(--font-display);font-weight:700;font-size:0.85rem;color:var(--teal-dark);text-decoration:none;">
+          Gallery View
+        </a>
+      </div>
+
+      <!-- Step 1: Take or Pick Photo -->
+      <div id="capture-step-1" class="capture-card">
+        <h2>Add a Drawing</h2>
+        <p>Take a photo of your drawing or pick an image from your device.</p>
+
+        <input id="camera-file-input" class="hidden-input" type="file" accept="image/*" capture="environment" />
+
+        <div id="live-cam-wrap" class="live-cam-wrap">
+          <video id="live-cam-video" autoplay playsinline muted></video>
+          <div class="cam-guide"></div>
+        </div>
+
+        <button id="take-photo-btn" class="big-cta">
+          Take Photo
+        </button>
+
+        <div style="height:10px;"></div>
+
+        <button id="toggle-live-cam-btn" class="big-cta secondary">
+          Use Live Camera
+        </button>
+
+        <div style="margin-top:16px; border-top:1.5px dashed rgba(196,154,108,0.35); padding-top:14px;">
+          <div style="font-size:0.82rem; font-weight:700; color:var(--ink-soft);">
+            Quick test samples:
+          </div>
+          <div class="sample-row">
+            <button class="sample-chip" data-sample="dino"><span>Dino</span></button>
+            <button class="sample-chip" data-sample="starcat"><span>Star Cat</span></button>
+            <button class="sample-chip" data-sample="rocket"><span>Rocket</span></button>
+          </div>
+        </div>
+
+        <div style="margin-top:14px; border-top:1.5px dashed rgba(196,154,108,0.35); padding-top:12px;">
+          <div style="font-size:0.8rem; font-weight:700; color:var(--ink-soft);">
+            Room: <span id="capture-room-display">------</span>
+          </div>
+          <div class="room-connect-row">
+            <input id="manual-room-input" type="text" maxlength="8" placeholder="Room code" />
+            <button id="manual-room-btn" class="btn-sm">Join</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 2: Preview & Send -->
+      <div id="capture-step-2" class="capture-card" style="display:none;">
+        <h2>Preview</h2>
+        <p>Give your drawing a name if you want, then send it to the gallery.</p>
+
+        <div class="preview-stage">
+          <img id="cutout-preview-img" alt="Drawing preview" style="border-radius: 14px;" />
+        </div>
+
+        <input id="char-name-input" class="text-input" type="text" maxlength="20" placeholder="Name (optional)" />
+
+        <div class="capture-btn-pair">
+          <button id="retake-btn" class="big-cta secondary">Retake</button>
+          <button id="send-gallery-btn" class="big-cta teal">Send to Gallery</button>
+        </div>
+
+        <div id="sent-banner" class="sent-banner">
+          <span id="sent-banner-msg">Sent to the gallery.</span><br/>
+          <button id="draw-another-btn" class="btn-sm" style="margin-top:10px;">Add Another</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      "use strict";
+
+      /* =====================================================================
+         1. ROUTING & ROOM CODE SETUP
+         Supports:
+           - Gallery Mode: default URL (e.g., index.html)
+           - Capture Mode: #capture?room=ABCDEF or ?mode=capture&room=ABCDEF
+         Using hash routing ensures QR links work on static hosts and local servers.
+         ===================================================================== */
+      const STORAGE_ROOM_KEY = "lcg_room_code_v1";
+      const STORAGE_CHARS_KEY = "lcg_characters_v1";
+      const MAX_STORED_CHARS = 24;
+
+      function generateRoomCode() {
+        const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let out = "";
+        for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+        return out;
+      }
+
+      function parseRoute() {
+        const searchParams = new URLSearchParams(window.location.search);
+        const hash = window.location.hash || "";
+        const [hashPath, hashQuery] = hash.replace(/^#/, "").split("?");
+        const hashParams = new URLSearchParams(hashQuery || "");
+
+        const isCapture = hashPath === "capture" || searchParams.get("mode") === "capture";
+        const roomFromUrl = (hashParams.get("room") || searchParams.get("room") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+        let roomCode = roomFromUrl;
+        if (!roomCode) {
+          roomCode = localStorage.getItem(STORAGE_ROOM_KEY) || generateRoomCode();
+          localStorage.setItem(STORAGE_ROOM_KEY, roomCode);
+        }
+
+        return { isCapture, roomCode };
+      }
+
+      let route = parseRoute();
+
+      /* =====================================================================
+         2. REAL-TIME SYNC LAYER (Same-Browser + Cross-Device WebRTC)
+         ---------------------------------------------------------------------
+         How it works:
+         A) Same-Device / Same-Browser Tabs:
+            Uses BroadcastChannel + localStorage 'storage' event fallback.
+            Works instantaneously with zero internet connection.
+         B) Cross-Device (Phone on Cellular/Wi-Fi -> Projector/TV):
+            Uses PeerJS (WebRTC DataChannels via public PeerJS signaling cloud).
+            - Gallery registers peer ID: `lcg-gallery-${roomCode}`
+            - Phone connects to `lcg-gallery-${roomCode}` and sends JSON payload.
+            To use a self-hosted PeerServer, pass `{ host, port, path }` to `new Peer(...)`.
+         ===================================================================== */
+      class GallerySync {
+        constructor(role, roomCode, onCharacterReceived, onStatusChange) {
+          this.role = role; // 'gallery' | 'capture'
+          this.roomCode = roomCode;
+          this.onCharacterReceived = onCharacterReceived;
+          this.onStatusChange = onStatusChange;
+          this.bc = null;
+          this.peer = null;
+          this.conn = null;
+          this.pendingPackets = [];
+          this.retryTimer = null;
+          this.destroyed = false;
+          this.initLocalChannel();
+          this.initPeer();
+        }
+
+        initLocalChannel() {
+          const channelName = `living-gallery-${this.roomCode}`;
+          if ("BroadcastChannel" in window) {
+            this.bc = new BroadcastChannel(channelName);
+            this.bc.onmessage = (ev) => {
+              if (ev.data && ev.data.type === "character" && this.role === "gallery") {
+                this.onCharacterReceived(ev.data.payload);
+              }
+            };
+          }
+          window.addEventListener("storage", (ev) => {
+            if (ev.key === `lcg_msg_${this.roomCode}` && ev.newValue && this.role === "gallery") {
+              try {
+                const msg = JSON.parse(ev.newValue);
+                if (msg.type === "character") this.onCharacterReceived(msg.payload);
+              } catch (_) {}
+            }
+          });
+        }
+
+        initPeer() {
+          if (typeof window.Peer === "undefined") {
+            this.onStatusChange("offline", "Local Mode");
+            return;
+          }
+
+          this.onStatusChange("connecting", "Connecting…");
+          const galleryPeerId = `lcg-gallery-${this.roomCode}`;
+          const peerOpts = {
+            debug: 0,
+            config: {
+              iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+                { urls: "stun:stun.cloudflare.com:3478" }
+              ]
+            }
+          };
+
+          try {
+            this.peer = this.role === "gallery"
+              ? new Peer(galleryPeerId, peerOpts)
+              : new Peer(peerOpts);
+          } catch (err) {
+            this.onStatusChange("offline", "Local Mode");
+            return;
+          }
+
+          this.peer.on("open", () => {
+            if (this.role === "gallery") {
+              this.onStatusChange("ready", "Ready for Phones");
+            } else {
+              this.connectToGallery(galleryPeerId);
+            }
+          });
+
+          this.peer.on("disconnected", () => {
+            if (!this.destroyed && this.peer && !this.peer.destroyed) {
+              try { this.peer.reconnect(); } catch (_) {}
+            }
+          });
+
+          if (this.role === "gallery") {
+            this.peer.on("connection", (conn) => {
+              conn.on("data", (data) => {
+                if (data && data.type === "character") {
+                  this.onCharacterReceived(data.payload);
+                }
+              });
+            });
+          }
+
+          this.peer.on("error", (err) => {
+            if (this.role === "capture" && err && err.type === "peer-unavailable") {
+              this.onStatusChange("connecting", `Waiting for room ${this.roomCode}…`);
+              this.scheduleRetry(galleryPeerId);
+            } else {
+              this.onStatusChange("offline", "Connection issue — retrying…");
+              if (this.role === "capture") this.scheduleRetry(galleryPeerId);
+            }
+          });
+        }
+
+        scheduleRetry(galleryPeerId) {
+          if (this.destroyed || this.retryTimer) return;
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null;
+            if (!this.destroyed && (!this.conn || !this.conn.open)) {
+              this.connectToGallery(galleryPeerId);
+            }
+          }, 3000);
+        }
+
+        connectToGallery(galleryPeerId) {
+          if (!this.peer || this.peer.destroyed || this.destroyed) return;
+          if (this.conn && this.conn.open) return;
+
+          this.onStatusChange("connecting", `Connecting to ${this.roomCode}…`);
+          const conn = this.peer.connect(galleryPeerId, { reliable: true });
+          this.conn = conn;
+
+          conn.on("open", () => {
+            this.onStatusChange("ready", `Connected (${this.roomCode})`);
+            while (this.pendingPackets.length > 0 && conn.open) {
+              conn.send(this.pendingPackets.shift());
+            }
+          });
+
+          conn.on("close", () => {
+            this.onStatusChange("connecting", "Reconnecting…");
+            this.scheduleRetry(galleryPeerId);
+          });
+
+          conn.on("error", () => {
+            this.onStatusChange("connecting", "Retrying…");
+            this.scheduleRetry(galleryPeerId);
+          });
+
+          // If ICE negotiation stalls, retry
+          setTimeout(() => {
+            if (!this.destroyed && this.conn === conn && !conn.open) {
+              this.scheduleRetry(galleryPeerId);
+            }
+          }, 5000);
+        }
+
+        sendCharacter(payload) {
+          const packet = { type: "character", payload };
+
+          // 1. Always broadcast locally (same-device / same-browser tabs)
+          if (this.bc) {
+            try { this.bc.postMessage(packet); } catch (_) {}
+          }
+          try {
+            localStorage.setItem(`lcg_msg_${this.roomCode}`, JSON.stringify({ ...packet, _t: Date.now() }));
+          } catch (_) {}
+
+          // 2. Send over WebRTC to remote Gallery screen if connected, else queue
+          if (this.conn && this.conn.open) {
+            this.conn.send(packet);
+            return "sent";
+          }
+          this.pendingPackets.push(packet);
+          if (this.peer && this.peer.open) {
+            this.connectToGallery(`lcg-gallery-${this.roomCode}`);
+          }
+          return "queued";
+        }
+
+        destroy() {
+          this.destroyed = true;
+          if (this.retryTimer) clearTimeout(this.retryTimer);
+          if (this.bc) this.bc.close();
+          if (this.peer) this.peer.destroy();
+        }
+      }
+
+      /* =====================================================================
+         3. IMAGE RESIZER (No background removal / no cutout)
+         Compresses photos to <= 480px JPEG so they transmit fast over WebRTC.
+         ===================================================================== */
+      function createPaperCutout(imgElement) {
+        const maxDim = 480;
+        const origW = imgElement.naturalWidth || imgElement.width;
+        const origH = imgElement.naturalHeight || imgElement.height;
+        const scale = Math.min(1, maxDim / Math.max(origW, origH));
+        const w = Math.max(40, Math.round(origW * scale));
+        const h = Math.max(40, Math.round(origH * scale));
+
+        const srcCanvas = document.createElement("canvas");
+        srcCanvas.width = w;
+        srcCanvas.height = h;
+        const sctx = srcCanvas.getContext("2d");
+        sctx.fillStyle = "#ffffff";
+        sctx.fillRect(0, 0, w, h);
+        sctx.drawImage(imgElement, 0, 0, w, h);
+        return srcCanvas.toDataURL("image/jpeg", 0.78);
+      }
+
+      /* =====================================================================
+         4. BUILT-IN SAMPLE DRAWINGS (On simulated paper for 1-click testing)
+         ===================================================================== */
+      function createSampleDrawingDataUrl(kind) {
+        const c = document.createElement("canvas");
+        c.width = 420;
+        c.height = 420;
+        const ctx = c.getContext("2d");
+
+        // Warm white paper background
+        ctx.fillStyle = "#faf6ee";
+        ctx.fillRect(0, 0, c.width, c.height);
+
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        if (kind === "dino") {
+          // Friendly green dinosaur
+          ctx.fillStyle = "#52b788";
+          ctx.strokeStyle = "#1b4332";
+          ctx.lineWidth = 8;
+
+          // Tail & Body
+          ctx.beginPath();
+          ctx.ellipse(205, 255, 86, 72, -0.1, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+
+          // Neck & Head
+          ctx.beginPath();
+          ctx.roundRect(225, 95, 85, 130, 40);
+          ctx.fill(); ctx.stroke();
+
+          // Cute spikes
+          ctx.fillStyle = "#ffb703";
+          for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.arc(215 - i * 24, 178 + i * 16, 13, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+          }
+
+          // Legs
+          ctx.fillStyle = "#52b788";
+          ctx.fillRect(150, 305, 34, 48); ctx.strokeRect(150, 305, 34, 48);
+          ctx.fillRect(222, 305, 34, 48); ctx.strokeRect(222, 305, 34, 48);
+
+          // Eye & Smile
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath(); ctx.arc(278, 135, 14, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = "#1b4332";
+          ctx.beginPath(); ctx.arc(282, 135, 6, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(276, 165, 18, 0.15, Math.PI - 0.15); ctx.stroke();
+        } else if (kind === "starcat") {
+          // Cheerful orange star-cat
+          ctx.fillStyle = "#ff9f1c";
+          ctx.strokeStyle = "#3d2c2e";
+          ctx.lineWidth = 8;
+
+          // Ears
+          ctx.beginPath();
+          ctx.moveTo(130, 160); ctx.lineTo(148, 86); ctx.lineTo(192, 135); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(290, 160); ctx.lineTo(272, 86); ctx.lineTo(228, 135); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+
+          // Body/Head
+          ctx.beginPath(); ctx.arc(210, 225, 95, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+          // Belly patch
+          ctx.fillStyle = "#fff3b0";
+          ctx.beginPath(); ctx.ellipse(210, 268, 48, 36, 0, 0, Math.PI * 2); ctx.fill();
+
+          // Eyes
+          ctx.fillStyle = "#3d2c2e";
+          ctx.beginPath(); ctx.arc(176, 200, 11, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(244, 200, 11, 0, Math.PI * 2); ctx.fill();
+
+          // Whiskers
+          ctx.beginPath();
+          ctx.moveTo(118, 212); ctx.lineTo(154, 218);
+          ctx.moveTo(118, 232); ctx.lineTo(154, 230);
+          ctx.moveTo(302, 212); ctx.lineTo(266, 218);
+          ctx.moveTo(302, 232); ctx.lineTo(266, 230);
+          ctx.stroke();
+
+          // Nose & Smile
+          ctx.fillStyle = "#ff5d8f";
+          ctx.beginPath(); ctx.arc(210, 218, 8, 0, Math.PI * 2); ctx.fill();
+        } else {
+          // Playful Rocket
+          ctx.strokeStyle = "#2b2d42";
+          ctx.lineWidth = 8;
+
+          // Flame
+          ctx.fillStyle = "#ffb703";
+          ctx.beginPath();
+          ctx.moveTo(182, 310); ctx.lineTo(210, 378); ctx.lineTo(238, 310); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+
+          // Fins
+          ctx.fillStyle = "#ff6b57";
+          ctx.beginPath(); ctx.moveTo(158, 250); ctx.lineTo(114, 305); ctx.lineTo(165, 305); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(262, 250); ctx.lineTo(306, 305); ctx.lineTo(255, 305); ctx.closePath(); ctx.fill(); ctx.stroke();
+
+          // Body
+          ctx.fillStyle = "#edf2f4";
+          ctx.beginPath();
+          ctx.ellipse(210, 210, 56, 110, 0, 0, Math.PI * 2);
+          ctx.fill(); ctx.stroke();
+
+          // Nose cone
+          ctx.fillStyle = "#ff6b57";
+          ctx.beginPath();
+          ctx.moveTo(166, 145); ctx.quadraticCurveTo(210, 62, 254, 145); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+
+          // Window
+          ctx.fillStyle = "#48cae4";
+          ctx.beginPath(); ctx.arc(210, 200, 26, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+
+        return c.toDataURL("image/png");
+      }
+
+      /* =====================================================================
+         5. GALLERY MODE CONTROLLER (60fps Animation Loop + Host Controls)
+         ===================================================================== */
+      function initGalleryMode(roomCode) {
+        const galleryView = document.getElementById("gallery-view");
+        galleryView.classList.add("active");
+
+        const stageEl = document.getElementById("gallery-stage");
+        const emptyStateEl = document.getElementById("empty-state");
+        const qrCardEl = document.getElementById("qr-card");
+        const qrContainer = document.getElementById("qr-code-container");
+        const roomCodeEl = document.getElementById("gallery-room-code");
+        const statusDot = document.getElementById("gallery-status-dot");
+        const toggleQrBtn = document.getElementById("toggle-qr-btn");
+        const qrToggleLabel = document.getElementById("qr-toggle-label");
+        const hostMenuBtn = document.getElementById("host-menu-btn");
+        const hostDrawer = document.getElementById("host-drawer");
+        const closeHostBtn = document.getElementById("close-host-btn");
+        const pausePlayBtn = document.getElementById("pause-play-btn");
+        const wobbleSlider = document.getElementById("wobble-slider");
+        const speedSlider = document.getElementById("speed-slider");
+        const wobbleValEl = document.getElementById("wobble-val");
+        const speedValEl = document.getElementById("speed-val");
+        const charCountEl = document.getElementById("char-count");
+        const hostCharListEl = document.getElementById("host-char-list");
+        const testCaptureLink = document.getElementById("open-capture-same-device");
+
+        let actors = []; // { id, name, imageDataUrl, el, x, y, vx, vy, width, height, phase, wobbleSpeed, wobbleAmp, bobPhase }
+        let isPaused = false;
+        let wobbleFactor = 1.0;
+        let speedFactor = 1.0;
+        let qrVisible = true;
+
+        function renderQrForRoom(code) {
+          roomCodeEl.textContent = code;
+          const captureUrl = `${window.location.origin}${window.location.pathname}#capture?room=${code}`;
+          testCaptureLink.href = captureUrl;
+
+          qrContainer.innerHTML = "";
+          if (typeof window.qrcode === "function") {
+            const qr = window.qrcode(0, "M");
+            qr.addData(captureUrl);
+            qr.make();
+            qrContainer.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0 });
+          } else {
+            qrContainer.textContent = `Room: ${code}`;
+          }
+
+          const helpEl = document.getElementById("qr-help-text");
+          if (window.location.protocol === "file:") {
+            helpEl.textContent = "Tip: Serve via local/web URL so phones can scan!";
+          } else {
+            helpEl.textContent = "Point your phone camera at the QR code.";
+          }
+        }
+
+        function saveCharacters() {
+          try {
+            const compact = actors.slice(-MAX_STORED_CHARS).map((a) => ({
+              id: a.id,
+              name: a.name,
+              imageDataUrl: a.imageDataUrl,
+            }));
+            localStorage.setItem(STORAGE_CHARS_KEY, JSON.stringify(compact));
+          } catch (_) {}
+        }
+
+        function updateEmptyAndHostList() {
+          emptyStateEl.style.display = actors.length === 0 ? "flex" : "none";
+          charCountEl.textContent = String(actors.length);
+
+          hostCharListEl.innerHTML = "";
+          actors.forEach((actor) => {
+            const row = document.createElement("div");
+            row.className = "char-list-item";
+
+            const thumb = document.createElement("img");
+            thumb.src = actor.imageDataUrl;
+            thumb.alt = actor.name || "Character";
+
+            const label = document.createElement("span");
+            label.className = "char-list-name";
+            label.textContent = actor.name || "Paper Friend";
+
+            const dlBtn = document.createElement("button");
+            dlBtn.className = "icon-btn";
+            dlBtn.title = "Download PNG";
+            dlBtn.textContent = "⬇";
+            dlBtn.onclick = () => {
+              const a = document.createElement("a");
+              a.href = actor.imageDataUrl;
+              a.download = `${(actor.name || "character").replace(/\s+/g, "_")}.png`;
+              a.click();
+            };
+
+            const delBtn = document.createElement("button");
+            delBtn.className = "icon-btn";
+            delBtn.title = "Remove";
+            delBtn.textContent = "✕";
+            delBtn.onclick = () => removeCharacter(actor.id);
+
+            row.append(thumb, label, dlBtn, delBtn);
+            hostCharListEl.appendChild(row);
+          });
+        }
+
+        function removeCharacter(id) {
+          const idx = actors.findIndex((a) => a.id === id);
+          if (idx === -1) return;
+          actors[idx].el.remove();
+          actors.splice(idx, 1);
+          saveCharacters();
+          updateEmptyAndHostList();
+        }
+
+        function triggerHappyReaction(actor) {
+          actor.el.classList.remove("hop");
+          void actor.el.offsetWidth;
+          actor.el.classList.add("hop");
+
+          const pop = document.createElement("div");
+          pop.className = "sparkle-pop";
+          const cheers = ["Hey!", "Whoa!", "Hi!", "Hello!"];
+          pop.textContent = actor.name ? actor.name : cheers[Math.floor(Math.random() * cheers.length)];
+          actor.el.appendChild(pop);
+          setTimeout(() => pop.remove(), 1050);
+        }
+
+        function addCharacter(charData, isNewArrival = true) {
+          // Deduplicate if same ID arrives twice
+          if (actors.some((a) => a.id === charData.id)) return;
+
+          const el = document.createElement("div");
+          el.className = isNewArrival ? "cutout-actor entering" : "cutout-actor";
+
+          const inner = document.createElement("div");
+          inner.className = "cutout-inner";
+
+          const img = document.createElement("img");
+          img.className = "cutout-img";
+          img.src = charData.imageDataUrl;
+          img.alt = charData.name || "Hand-drawn character";
+          inner.appendChild(img);
+
+          if (charData.name) {
+            const tag = document.createElement("div");
+            tag.className = "cutout-tag";
+            tag.textContent = charData.name;
+            inner.appendChild(tag);
+          }
+
+          if (isNewArrival) {
+            const badge = document.createElement("div");
+            badge.className = "cutout-new-badge";
+            badge.textContent = "NEW!";
+            inner.appendChild(badge);
+            setTimeout(() => badge.remove(), 6500);
+          }
+
+          el.appendChild(inner);
+          stageEl.appendChild(el);
+
+          const sw = window.innerWidth;
+          const sh = window.innerHeight;
+          const padX = Math.min(180, sw * 0.16);
+          const x = padX + Math.random() * Math.max(80, sw - padX * 2 - 160);
+          const y = 95 + Math.random() * Math.max(80, sh - 290);
+
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          const vDir = Math.random() < 0.5 ? -1 : 1;
+          const actor = {
+            id: charData.id || `c_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            name: charData.name || "",
+            imageDataUrl: charData.imageDataUrl,
+            el,
+            x,
+            y,
+            vx: dir * (18 + Math.random() * 48),
+            vy: vDir * (12 + Math.random() * 34),
+            baseScale: 0.8 + Math.random() * 0.36,
+            width: 170,
+            height: 170,
+            phase: Math.random() * Math.PI * 2,
+            wobbleSpeed: 1.4 + Math.random() * 2.4,
+            wobbleAmp: 3.5 + Math.random() * 6.5,
+            bobPhase: Math.random() * Math.PI * 2,
+            bobSpeed: 1.3 + Math.random() * 2.3,
+            bobAmp: 14 + Math.random() * 28,
+            bobPhase2: Math.random() * Math.PI * 2,
+            bobSpeed2: 0.5 + Math.random() * 1.1,
+            bobAmp2: 6 + Math.random() * 14,
+            nextWanderAt: performance.now() + 1200 + Math.random() * 3000,
+            isDragging: false,
+          };
+
+          img.onload = () => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 20) actor.width = rect.width;
+            if (rect.height > 20) actor.height = rect.height;
+          };
+
+          // Drag & drop (mouse + touch) to grab and toss characters around
+          let dragStartX = 0, dragStartY = 0, originX = 0, originY = 0;
+          let lastMoveX = 0, lastMoveY = 0, lastMoveT = 0;
+          let throwVx = 0, throwVy = 0, movedDist = 0;
+
+          el.addEventListener("pointerdown", (e) => {
+            if (e.button !== 0 && e.pointerType === "mouse") return;
+            e.preventDefault();
+            actor.isDragging = true;
+            el.classList.add("dragging");
+            el.setPointerCapture(e.pointerId);
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            originX = actor.x;
+            originY = actor.y;
+            lastMoveX = e.clientX;
+            lastMoveY = e.clientY;
+            lastMoveT = performance.now();
+            throwVx = 0;
+            throwVy = 0;
+            movedDist = 0;
+          });
+
+          el.addEventListener("pointermove", (e) => {
+            if (!actor.isDragging) return;
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            movedDist = Math.hypot(dx, dy);
+            actor.x = originX + dx;
+            actor.y = originY + dy;
+
+            const now = performance.now();
+            const dtMs = Math.max(8, now - lastMoveT);
+            throwVx = ((e.clientX - lastMoveX) / dtMs) * 1000;
+            throwVy = ((e.clientY - lastMoveY) / dtMs) * 1000;
+            lastMoveX = e.clientX;
+            lastMoveY = e.clientY;
+            lastMoveT = now;
+
+            const s = actor.baseScale || 1;
+            const flipX = actor.vx < 0 ? -1 : 1;
+            el.style.transform = `translate3d(${actor.x.toFixed(1)}px, ${actor.y.toFixed(1)}px, 0) rotate(0deg) scaleX(${(flipX * s).toFixed(3)}) scaleY(${s.toFixed(3)})`;
+          });
+
+          const endDrag = (e) => {
+            if (!actor.isDragging) return;
+            actor.isDragging = false;
+            el.classList.remove("dragging");
+            if (el.hasPointerCapture && el.hasPointerCapture(e.pointerId)) {
+              el.releasePointerCapture(e.pointerId);
+            }
+            if (movedDist < 6) {
+              triggerHappyReaction(actor);
+            } else {
+              // Apply gentle toss momentum clamped to readable speeds
+              if (Math.hypot(throwVx, throwVy) > 25) {
+                actor.vx = Math.max(-95, Math.min(95, throwVx * 0.25));
+                actor.vy = Math.max(-75, Math.min(75, throwVy * 0.25));
+              }
+              actor.nextWanderAt = performance.now() + 1800 + Math.random() * 2200;
+            }
+          };
+
+          el.addEventListener("pointerup", endDrag);
+          el.addEventListener("pointercancel", endDrag);
+
+          actors.push(actor);
+          if (actors.length > MAX_STORED_CHARS) {
+            const oldest = actors.shift();
+            oldest.el.remove();
+          }
+
+          saveCharacters();
+          updateEmptyAndHostList();
+        }
+
+        // Load saved characters on startup
+        try {
+          const saved = JSON.parse(localStorage.getItem(STORAGE_CHARS_KEY) || "[]");
+          if (Array.isArray(saved)) {
+            saved.forEach((c) => addCharacter(c, false));
+          }
+        } catch (_) {}
+
+        renderQrForRoom(roomCode);
+
+        // Sync setup
+        let sync = new GallerySync(
+          "gallery",
+          roomCode,
+          (payload) => addCharacter(payload, true),
+          (status) => {
+            statusDot.className = `status-dot ${status}`;
+          }
+        );
+
+        // 60fps Animation Loop
+        let lastTs = performance.now();
+        function tick(now) {
+          const dt = Math.min(0.05, (now - lastTs) / 1000);
+          lastTs = now;
+          const t = now / 1000;
+
+          const sw = window.innerWidth;
+          const sh = window.innerHeight;
+          const minX = 24;
+          const minY = 82;
+          const maxYBase = sh - 68;
+
+          if (!isPaused) {
+            // Soft separation so cutouts don't awkwardly stack
+            for (let i = 0; i < actors.length; i++) {
+              for (let j = i + 1; j < actors.length; j++) {
+                const a = actors[i];
+                const b = actors[j];
+                if (a.isDragging || b.isDragging) continue;
+                const dx = (a.x + a.width * 0.5) - (b.x + b.width * 0.5);
+                const dy = (a.y + a.height * 0.5) - (b.y + b.height * 0.5);
+                const distSq = dx * dx + dy * dy;
+                const minDist = 145;
+                if (distSq > 1 && distSq < minDist * minDist) {
+                  const dist = Math.sqrt(distSq);
+                  const push = ((minDist - dist) / minDist) * 28 * dt;
+                  const nx = dx / dist;
+                  const ny = dy / dist;
+                  a.x += nx * push;
+                  a.y += ny * push;
+                  b.x -= nx * push;
+                  b.y -= ny * push;
+                }
+              }
+            }
+
+            for (const actor of actors) {
+              if (actor.isDragging) continue;
+              // Periodically nudge velocity randomly for organic, unpredictable wandering
+              if (now >= actor.nextWanderAt) {
+                actor.nextWanderAt = now + 1400 + Math.random() * 3400;
+                actor.vx += (Math.random() - 0.5) * 44;
+                actor.vy += (Math.random() - 0.5) * 38;
+                // Keep speeds within lively, readable bounds
+                const maxVx = 72, maxVy = 52;
+                actor.vx = Math.max(-maxVx, Math.min(maxVx, actor.vx));
+                actor.vy = Math.max(-maxVy, Math.min(maxVy, actor.vy));
+                if (Math.abs(actor.vx) < 12) actor.vx = (actor.vx < 0 ? -1 : 1) * (16 + Math.random() * 18);
+              }
+
+              actor.x += actor.vx * speedFactor * dt;
+              actor.y += actor.vy * speedFactor * dt;
+
+              const maxX = Math.max(minX + 40, sw - actor.width - 24);
+              const maxY = Math.max(minY + 40, maxYBase - actor.height);
+
+              if (actor.x < minX) { actor.x = minX; actor.vx = Math.abs(actor.vx); }
+              if (actor.x > maxX) { actor.x = maxX; actor.vx = -Math.abs(actor.vx); }
+              if (actor.y < minY) { actor.y = minY; actor.vy = Math.abs(actor.vy); }
+              if (actor.y > maxY) { actor.y = maxY; actor.vy = -Math.abs(actor.vy); }
+
+              const wobbleDeg = Math.sin(t * actor.wobbleSpeed + actor.phase) * actor.wobbleAmp * wobbleFactor;
+              // Dual-wave vertical fluctuation so each character rises & dips unpredictably
+              const bobY = (
+                Math.sin(t * actor.bobSpeed + actor.bobPhase) * actor.bobAmp +
+                Math.cos(t * actor.bobSpeed2 + actor.bobPhase2) * actor.bobAmp2
+              ) * wobbleFactor;
+              const flipX = actor.vx < 0 ? -1 : 1;
+              const s = actor.baseScale || 1;
+
+              actor.el.style.transform = `translate3d(${actor.x.toFixed(1)}px, ${(actor.y + bobY).toFixed(1)}px, 0) rotate(${wobbleDeg.toFixed(2)}deg) scaleX(${(flipX * s).toFixed(3)}) scaleY(${s.toFixed(3)})`;
+              // Keep name tag readable (unflipped)
+              const tag = actor.el.querySelector(".cutout-tag");
+              if (tag) tag.style.transform = `scaleX(${flipX})`;
+            }
+          }
+
+          requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+
+        // Drag & drop image files from computer directly onto the Gallery
+        const dropOverlay = document.getElementById("drop-overlay");
+        let dragDepth = 0;
+
+        galleryView.addEventListener("dragenter", (e) => {
+          if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+            dragDepth++;
+            dropOverlay.classList.add("active");
+          }
+        });
+
+        galleryView.addEventListener("dragover", (e) => {
+          if (e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files")) {
+            e.preventDefault();
+          }
+        });
+
+        galleryView.addEventListener("dragleave", () => {
+          dragDepth = Math.max(0, dragDepth - 1);
+          if (dragDepth === 0) dropOverlay.classList.remove("active");
+        });
+
+        galleryView.addEventListener("drop", (e) => {
+          e.preventDefault();
+          dragDepth = 0;
+          dropOverlay.classList.remove("active");
+          const files = e.dataTransfer && e.dataTransfer.files;
+          if (!files || !files.length) return;
+          Array.from(files).forEach((file) => {
+            if (!file.type.startsWith("image/")) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const img = new Image();
+              img.onload = () => {
+                const cutoutUrl = createPaperCutout(img, { sensitivity: 28 });
+                const baseName = file.name.replace(/\.[^.]+$/, "").slice(0, 18);
+                addCharacter({
+                  id: `drop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                  name: baseName,
+                  imageDataUrl: cutoutUrl,
+                }, true);
+              };
+              img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+          });
+        });
+
+        // UI Event Bindings
+        toggleQrBtn.addEventListener("click", () => {
+          qrVisible = !qrVisible;
+          qrCardEl.classList.toggle("hidden", !qrVisible);
+          qrToggleLabel.textContent = qrVisible ? "Hide QR" : "Show QR";
+        });
+
+        hostMenuBtn.addEventListener("click", () => hostDrawer.classList.toggle("open"));
+        closeHostBtn.addEventListener("click", () => hostDrawer.classList.remove("open"));
+
+        pausePlayBtn.addEventListener("click", () => {
+          isPaused = !isPaused;
+          pausePlayBtn.textContent = isPaused ? "Play" : "Pause";
+        });
+
+        wobbleSlider.addEventListener("input", () => {
+          wobbleFactor = Number(wobbleSlider.value) / 100;
+          wobbleValEl.textContent = `${wobbleSlider.value}%`;
+        });
+
+        speedSlider.addEventListener("input", () => {
+          speedFactor = Number(speedSlider.value) / 100;
+          speedValEl.textContent = `${speedSlider.value}%`;
+        });
+
+        function addSampleCutout(kind, label) {
+          const sampleUrl = createSampleDrawingDataUrl(kind);
+          const img = new Image();
+          img.onload = () => {
+            const cutoutUrl = createPaperCutout(img, { sensitivity: 28 });
+            addCharacter({
+              id: `sample_${kind}_${Date.now()}`,
+              name: label,
+              imageDataUrl: cutoutUrl,
+            }, true);
+          };
+          img.src = sampleUrl;
+        }
+
+        document.getElementById("empty-add-sample-btn").addEventListener("click", () => {
+          addSampleCutout("dino", "Rexy");
+          setTimeout(() => addSampleCutout("starcat", "Mochi"), 220);
+          setTimeout(() => addSampleCutout("rocket", "Zoom"), 440);
+        });
+
+        document.getElementById("host-add-sample-btn").addEventListener("click", () => {
+          const choices = [
+            ["dino", "Rexy"],
+            ["starcat", "Mochi"],
+            ["rocket", "Zoom"],
+          ];
+          const pick = choices[Math.floor(Math.random() * choices.length)];
+          addSampleCutout(pick[0], pick[1]);
+        });
+
+        document.getElementById("empty-open-capture-btn").addEventListener("click", () => {
+          window.open(`${window.location.origin}${window.location.pathname}#capture?room=${roomCode}`, "_blank");
+        });
+
+        document.getElementById("clear-gallery-btn").addEventListener("click", () => {
+          if (actors.length === 0) return;
+          if (confirm("Clear all characters from the gallery?")) {
+            actors.forEach((a) => a.el.remove());
+            actors = [];
+            saveCharacters();
+            updateEmptyAndHostList();
+          }
+        });
+
+        document.getElementById("new-room-btn").addEventListener("click", () => {
+          const nextCode = generateRoomCode();
+          localStorage.setItem(STORAGE_ROOM_KEY, nextCode);
+          roomCode = nextCode;
+          renderQrForRoom(roomCode);
+          sync.destroy();
+          sync = new GallerySync(
+            "gallery",
+            roomCode,
+            (payload) => addCharacter(payload, true),
+            (status) => { statusDot.className = `status-dot ${status}`; }
+          );
+        });
+      }
+
+      /* =====================================================================
+         6. MOBILE CAPTURE MODE CONTROLLER
+         ===================================================================== */
+      function initCaptureMode(initialRoomCode) {
+        const captureView = document.getElementById("capture-view");
+        captureView.classList.add("active");
+
+        let roomCode = initialRoomCode;
+        const statusDot = document.getElementById("capture-status-dot");
+        const statusText = document.getElementById("capture-status-text");
+        const roomDisplay = document.getElementById("capture-room-display");
+        const manualRoomInput = document.getElementById("manual-room-input");
+        const manualRoomBtn = document.getElementById("manual-room-btn");
+
+        const step1 = document.getElementById("capture-step-1");
+        const step2 = document.getElementById("capture-step-2");
+        const fileInput = document.getElementById("camera-file-input");
+        const takePhotoBtn = document.getElementById("take-photo-btn");
+        const toggleLiveCamBtn = document.getElementById("toggle-live-cam-btn");
+        const liveCamWrap = document.getElementById("live-cam-wrap");
+        const liveCamVideo = document.getElementById("live-cam-video");
+
+        const previewImg = document.getElementById("cutout-preview-img");
+        const charNameInput = document.getElementById("char-name-input");
+        const retakeBtn = document.getElementById("retake-btn");
+        const sendBtn = document.getElementById("send-gallery-btn");
+        const sentBanner = document.getElementById("sent-banner");
+        const drawAnotherBtn = document.getElementById("draw-another-btn");
+
+        let sourceImgObj = null;
+        let latestCutoutUrl = "";
+        let mediaStream = null;
+
+        document.getElementById("switch-to-gallery-link").href = window.location.pathname;
+
+        function bindSync(code) {
+          roomCode = code;
+          roomDisplay.textContent = code;
+          manualRoomInput.value = code;
+          return new GallerySync(
+            "capture",
+            code,
+            () => {},
+            (status, label) => {
+              statusDot.className = `status-dot ${status}`;
+              statusText.textContent = label || status;
+            }
+          );
+        }
+
+        let sync = bindSync(roomCode);
+
+        manualRoomBtn.addEventListener("click", () => {
+          const cleaned = manualRoomInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+          if (cleaned.length >= 3) {
+            sync.destroy();
+            sync = bindSync(cleaned);
+          }
+        });
+
+        function stopLiveCamera() {
+          if (mediaStream) {
+            mediaStream.getTracks().forEach((t) => t.stop());
+            mediaStream = null;
+          }
+          liveCamWrap.classList.remove("active");
+          toggleLiveCamBtn.textContent = "Use Live Camera";
+        }
+
+        function refreshCutoutPreview() {
+          if (!sourceImgObj) return;
+          latestCutoutUrl = createPaperCutout(sourceImgObj);
+          previewImg.src = latestCutoutUrl;
+        }
+
+        function loadSourceImage(dataUrl) {
+          stopLiveCamera();
+          const img = new Image();
+          img.onload = () => {
+            sourceImgObj = img;
+            sentBanner.classList.remove("show");
+            refreshCutoutPreview();
+            step1.style.display = "none";
+            step2.style.display = "block";
+          };
+          img.src = dataUrl;
+        }
+
+        takePhotoBtn.addEventListener("click", () => {
+          if (mediaStream && liveCamVideo.videoWidth > 0) {
+            // Snap directly from live camera preview
+            const c = document.createElement("canvas");
+            c.width = liveCamVideo.videoWidth;
+            c.height = liveCamVideo.videoHeight;
+            c.getContext("2d").drawImage(liveCamVideo, 0, 0);
+            loadSourceImage(c.toDataURL("image/jpeg", 0.92));
+          } else {
+            fileInput.click();
+          }
+        });
+
+        fileInput.addEventListener("change", (ev) => {
+          const file = ev.target.files && ev.target.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (e) => loadSourceImage(e.target.result);
+          reader.readAsDataURL(file);
+          fileInput.value = "";
+        });
+
+        toggleLiveCamBtn.addEventListener("click", async () => {
+          if (mediaStream) {
+            stopLiveCamera();
+            takePhotoBtn.textContent = "Take Photo";
+            return;
+          }
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            alert("Live camera preview isn't available in this browser. Use 'Take Photo' instead.");
+            return;
+          }
+          try {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: { ideal: "environment" } },
+              audio: false,
+            });
+            liveCamVideo.srcObject = mediaStream;
+            liveCamWrap.classList.add("active");
+            takePhotoBtn.textContent = "Capture Frame";
+            toggleLiveCamBtn.textContent = "Close Camera";
+          } catch (_) {
+            alert("Camera permission was declined. You can still use 'Take Photo'.");
+          }
+        });
+
+        document.querySelectorAll(".sample-chip").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const kind = btn.getAttribute("data-sample");
+            const names = { dino: "Rexy", starcat: "Mochi", rocket: "Zoom" };
+            charNameInput.value = names[kind] || "";
+            loadSourceImage(createSampleDrawingDataUrl(kind));
+          });
+        });
+
+        retakeBtn.addEventListener("click", () => {
+          step2.style.display = "none";
+          step1.style.display = "block";
+        });
+
+        drawAnotherBtn.addEventListener("click", () => {
+          charNameInput.value = "";
+          sentBanner.classList.remove("show");
+          step2.style.display = "none";
+          step1.style.display = "block";
+        });
+
+        sendBtn.addEventListener("click", () => {
+          if (!latestCutoutUrl) return;
+          const status = sync.sendCharacter({
+            id: `char_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            name: charNameInput.value.trim(),
+            imageDataUrl: latestCutoutUrl,
+            timestamp: Date.now(),
+          });
+          const msgEl = document.getElementById("sent-banner-msg");
+          msgEl.textContent = status === "sent"
+            ? "Sent to the gallery."
+            : "Waiting for gallery connection — keep this page open for a moment…";
+          sentBanner.classList.add("show");
+        });
+      }
+
+      /* =====================================================================
+         7. BOOTSTRAP
+         ===================================================================== */
+      window.addEventListener("hashchange", () => window.location.reload());
+
+      if (route.isCapture) {
+        initCaptureMode(route.roomCode);
+      } else {
+        initGalleryMode(route.roomCode);
+      }
+    })();
+  </script>
+</body>
+</html>
